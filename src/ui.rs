@@ -76,8 +76,17 @@ pub fn edit<B: Backend>(f: &mut Frame<B>, data_table: &mut DataTable) {
             .max()
             .unwrap_or(0)
             + 1;
-        let index = format!("{:>7}", index); //9,999,999までindex可能
-        let idx_cell = [Cell::from(index).style(Style::default().fg(Color::DarkGray))].into_iter();
+        let mut index_str = format!("{:>7}", index); //9,999,999までindex可能
+
+        match data_table.rows_selected.contains(&index) {
+            true => {
+                index_str += "💋";
+            }
+            false => {}
+        }
+
+        let idx_cell =
+            [Cell::from(index_str).style(Style::default().fg(Color::DarkGray))].into_iter();
         let value_cells = item.iter().map(|c| Cell::from(c.clone()));
         let cells = idx_cell.chain(value_cells);
         Row::new(cells).height(height as u16).bottom_margin(0)
@@ -85,7 +94,7 @@ pub fn edit<B: Backend>(f: &mut Frame<B>, data_table: &mut DataTable) {
 
     // 表示するカラムのwidthsを動的に作る
     // 1カラム目は7(index), 残りはvalueで一律長さ30
-    let mut widths = vec![Constraint::Length(7)];
+    let mut widths = vec![Constraint::Length(10)];
     let mut value_widths = vec![Constraint::Length(30); data_table.schema.columns.len()];
     widths.append(&mut value_widths);
 
@@ -121,11 +130,10 @@ pub fn select<B: Backend>(f: &mut Frame<B>, menu_list: &mut StatefulList<ListIte
     let items_widget = List::new(items)
         .block(Block::default().borders(Borders::ALL).title("List"))
         .highlight_style(
-            Style::default()
-                .bg(Color::LightGreen)
+            Style::default() // .bg(Color::LightGreen)
                 .add_modifier(Modifier::BOLD),
         )
-        .highlight_symbol(">> ");
+        .highlight_symbol(">>");
 
     // 表示
     f.render_stateful_widget(items_widget, rects[0], &mut menu_list.state);

@@ -1,6 +1,7 @@
 pub use std::collections::HashMap;
 
 use regex::{Regex, RegexBuilder};
+use std::collections::BTreeSet;
 use std::fmt::Display;
 pub use tui::widgets::{ListState, TableState};
 
@@ -64,6 +65,7 @@ impl TableSchema {
 #[derive(Debug)]
 pub struct DataTable {
     pub state: TableState,
+    pub rows_selected: BTreeSet<usize>,
     pub schema: TableSchema,
     pub values: Vec<Vec<String>>,
 }
@@ -105,6 +107,7 @@ impl DataTable {
 
         let mut return_value = DataTable {
             state: TableState::default(),
+            rows_selected: BTreeSet::new(),
             schema: initial_schema,
             values,
         };
@@ -116,7 +119,7 @@ impl DataTable {
     pub fn next(&mut self) {
         let i = match self.state.selected() {
             Some(i) => {
-                if i >= self.values.len() - 1 {
+                if i + 1 >= self.values.len() {
                     0
                 } else {
                     i + 1
@@ -124,7 +127,12 @@ impl DataTable {
             }
             None => 0,
         };
-        self.state.select(Some(i));
+        if self.values.is_empty() {
+            self.add_row();
+            self.state.select(Some(0));
+        } else {
+            self.state.select(Some(i));
+        }
     }
     pub fn previous(&mut self) {
         let i = match self.state.selected() {
@@ -138,15 +146,6 @@ impl DataTable {
             None => 0,
         };
         self.state.select(Some(i));
-    }
-    pub fn edit_row(&mut self) {
-        let line = self.state.selected();
-        match line {
-            Some(idx) => {
-                self.values[idx] = vec!["edit".to_owned(); self.schema.columns.len()];
-            }
-            None => (),
-        }
     }
 
     pub fn infer_field_type(&self, string: &str) -> DataType {
@@ -233,7 +232,7 @@ impl DataTable {
     }
 
     pub fn add_row(&mut self) {
-        let new_line = vec!["".to_owned(); self.schema.columns.len()];
+        let new_line = vec!["".to_owned(); self.schema.columns.len()]; // TODO: スキーマに沿ったデフォルト値生成
         self.values.push(new_line);
     }
     pub fn add_column(self) {

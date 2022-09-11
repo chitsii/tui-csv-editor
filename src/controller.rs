@@ -49,7 +49,7 @@ impl App {
             state: ConsoleState::Start,
         }
     }
-    pub fn run<B: Backend>(&mut self, terminal: &mut Terminal<B>) -> io::Result<()> {
+    pub fn run<B: Backend>(&mut self, terminal: &mut Terminal<B>) -> Result<()> {
         //テーブルに表示するデータ準備
         let data = vec![
             vec!["Header1", "Header2", "Header3", "Header4", "Header5"],
@@ -59,19 +59,17 @@ impl App {
         ];
         let mut data_table = DataTable::new(data);
 
-        // イベントループ
+        // 画面遷移のイベントループ
         loop {
             self.state = match self.state {
                 ConsoleState::Start => ConsoleState::Select,
                 ConsoleState::Select => {
-                    let items: Vec<ListItem> = vec![ListItem::new("text1"), ListItem::new("text2")];
+                    let items: Vec<ListItem> =
+                        vec![ListItem::new("text1.csv"), ListItem::new("text2.csv")];
                     let menu_list = StatefulList::with_items(items.clone());
                     self.selecting(terminal, menu_list).unwrap()
                 }
-                ConsoleState::EditTable => {
-                    // 編集画面のイベントループ
-                    self.table_editing(terminal, &mut data_table).unwrap()
-                }
+                ConsoleState::EditTable => self.table_editing(terminal, &mut data_table).unwrap(),
                 ConsoleState::CheckIntegrity => {
                     println!("Integrity check mode");
                     ConsoleState::EditTable
@@ -86,43 +84,77 @@ impl App {
         &self,
         terminal: &mut Terminal<B>,
         data_table: &mut DataTable,
-    ) -> io::Result<ConsoleState> {
-        let mut selected_indices: BTreeSet<usize> = BTreeSet::new();
+    ) -> Result<ConsoleState> {
         loop {
             terminal.draw(|f| ui::edit(f, data_table))?;
 
-            if let Event::Key(key) = event::read()? {
-                match key.code {
-                    KeyCode::Esc => return Ok(ConsoleState::Select),
-                    KeyCode::Enter => {
+            if let Event::Key(key_event) = event::read()? {
+                match key_event {
+                    KeyEvent {
+                        code: KeyCode::Esc, ..
+                    } => return Ok(ConsoleState::Select),
+                    KeyEvent {
+                        code: KeyCode::Enter,
+                        ..
+                    } => {
                         self.row_editing(terminal, data_table)?;
                     }
-                    KeyCode::Down => data_table.next(),
-                    KeyCode::Up => data_table.previous(),
-                    KeyCode::Char('r') => data_table.infer_schema(Some(100)),
+                    KeyEvent {
+                        code: KeyCode::Down,
+                        ..
+                    } => data_table.next(),
+                    KeyEvent {
+                        code: KeyCode::Up, ..
+                    } => data_table.previous(),
+                    // スキーマの再推論
+                    KeyEvent {
+                        code: KeyCode::Char('r'),
+                        modifiers: KeyModifiers::CONTROL,
+                        ..
+                    } => data_table.infer_schema(Some(100)),
                     // 行を選択
-                    KeyCode::Right => {
+                    KeyEvent {
+                        code: KeyCode::Right,
+                        ..
+                    } => {
                         if let Some(idx) = data_table.state.selected() {
-                            selected_indices.insert(idx);
+                            data_table.rows_selected.insert(idx);
                         }
                     }
                     // 行選択をはずす
-                    KeyCode::Left => {
+                    KeyEvent {
+                        code: KeyCode::Left,
+                        ..
+                    } => {
                         if let Some(idx) = data_table.state.selected() {
-                            if selected_indices.contains(&idx) {
-                                selected_indices.take(&idx);
-                            } else {
-                                continue;
+                            if data_table.rows_selected.contains(&idx) {
+                                data_table.rows_selected.take(&idx);
                             }
                         }
                     }
-                    KeyCode::Char('u') => {
-                        for idx in &selected_indices {
+                    // ペースト
+                    KeyEvent {
+                        code: KeyCode::Char('v'),
+                        modifiers: KeyModifiers::CONTROL,
+                        ..
+                    } => {
+                        for idx in &data_table.rows_selected {
                             let r = data_table.values[*idx].clone();
                             data_table
                                 .values
-                                .insert(data_table.state.selected().unwrap(), r)
+                                .insert(data_table.state.selected().unwrap() + 1, r)
                         }
+                    }
+                    //行削除
+                    KeyEvent {
+                        code: KeyCode::Delete,
+                        ..
+                    } => {
+                        for i in data_table.rows_selected.iter().rev() {
+                            data_table.values.remove(*i);
+                        }
+                        data_table.rows_selected = BTreeSet::new(); //該当行を消したので初期化
+                        data_table.state.select(None); // select行が消えた場合はNoneにする
                     }
                     _ => (),
                 }
@@ -134,7 +166,7 @@ impl App {
         &self,
         terminal: &mut Terminal<B>,
         data_table: &mut DataTable,
-    ) -> io::Result<ConsoleState> {
+    ) -> Result<ConsoleState> {
         // テキストエリアのアクティブ・非アクティブ関数
         fn inactivate(textarea: &mut TextArea<'_>) {
             textarea.set_cursor_line_style(Style::default());
@@ -296,7 +328,7 @@ impl App {
         &self,
         terminal: &mut Terminal<B>,
         mut menu_list: StatefulList<ListItem>,
-    ) -> io::Result<ConsoleState> {
+    ) -> Result<ConsoleState> {
         loop {
             terminal.draw(|f| ui::select(f, &mut menu_list))?;
             if let Event::Key(key) = event::read()? {
@@ -312,7 +344,7 @@ impl App {
     }
 }
 
-pub fn run_app() -> Result<(), Box<dyn Error>> {
+pub fn run_app() -> Result<()> {
     // ターミナルのセットアップ
     enable_raw_mode()?;
     let mut stdout = io::stdout();

@@ -139,6 +139,15 @@ impl DataTable {
         };
         self.state.select(Some(i));
     }
+    pub fn edit_row(&mut self) {
+        let line = self.state.selected();
+        match line {
+            Some(idx) => {
+                self.values[idx] = vec!["edit".to_owned(); self.schema.columns.len()];
+            }
+            None => (),
+        }
+    }
 
     pub fn infer_field_type(&self, string: &str) -> DataType {
         let boolean_re = RegexBuilder::new(r"^\s*(true)$|^(false)$")
@@ -275,4 +284,12 @@ impl<T> StatefulList<T> {
     pub fn unselect(&mut self) {
         self.state.select(None);
     }
+}
+
+pub struct InputText {
+    pub input: String,
+    pub current_width: usize,
+    pub input_width: HashMap<usize, u16>,
+    pub messages: Vec<String>,
+    pub lines: usize,
 }

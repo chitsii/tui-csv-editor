@@ -1,8 +1,8 @@
-use crate::model::{DataTable, StatefulList};
+use crate::model::{DataTable, InputText, StatefulList};
 
 use tui::{
     backend::Backend,
-    layout::{Alignment, Constraint, Direction, Layout},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{
         Span,
@@ -13,6 +13,7 @@ use tui::{
         BorderType,
         Borders,
         Cell,
+        Clear,
         List,
         ListItem,
         ListState,
@@ -20,10 +21,12 @@ use tui::{
         Row,
         Table,
         //TableState,
-        //Wrap,
+        Wrap,
     },
     Frame,
 };
+
+use tui_textarea::TextArea;
 
 pub fn editor_title<'a>() -> Paragraph<'a> {
     let text = vec![
@@ -81,7 +84,7 @@ pub fn edit<B: Backend>(f: &mut Frame<B>, data_table: &mut DataTable) {
     });
 
     // 表示するカラムのwidthsを動的に作る
-    // 1カラム目はindex, 残りはvalueで一律長さ30
+    // 1カラム目は7(index), 残りはvalueで一律長さ30
     let mut widths = vec![Constraint::Length(7)];
     let mut value_widths = vec![Constraint::Length(30); data_table.schema.columns.len()];
     widths.append(&mut value_widths);

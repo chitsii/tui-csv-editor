@@ -11,6 +11,9 @@ mod ui;
 use crate::prelude::*;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    controller::run_app()?;
+    let res = controller::run_app();
+    if let Err(err) = res {
+        println!("{:?}", err)
+    }
     Ok(())
 }

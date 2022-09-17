@@ -40,6 +40,7 @@ pub struct App {
     state: ConsoleState,
     data_tables: DataTables,
     archive_dir: String,
+    master_dir: String,
 }
 
 impl App {
@@ -74,6 +75,7 @@ impl App {
         Self {
             state: ConsoleState::Start,
             data_tables,
+            master_dir: master_dir.to_string(),
             archive_dir,
         }
     }
@@ -156,6 +158,7 @@ impl App {
                             let save_path = Path::new(&save_root_dir).join(Path::new(table_name));
                             save_to_file(self.get_table(table_name).unwrap().text(), save_path)?;
                         }
+                        copy_recursive(save_dir, &self.master_dir)?;
                     }
                     _ => {}
                 }

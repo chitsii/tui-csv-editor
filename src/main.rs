@@ -3,7 +3,7 @@
 
 mod prelude {
     pub use crate::data_reader::get_string_records;
-    pub use crate::utils::{copy, get_text, glob, save_to_file};
+    pub use crate::utils::{copy_recursive, get_text, glob, save_to_file};
     pub use anyhow::Result;
     pub use chrono::{DateTime, Local};
     pub use std::collections::{BTreeMap, BTreeSet};

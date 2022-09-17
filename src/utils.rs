@@ -1,7 +1,6 @@
 use crate::prelude::*;
 use std::ffi::OsString;
-use std::fs;
-use std::fs::{DirBuilder, File};
+use std::fs::{self, DirBuilder, File};
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 
 /// 対象ディレクトリを再帰的に探索して、指定拡張子のファイルのパスの配列を返す
@@ -55,7 +54,10 @@ pub fn save_to_file(content: String, path: PathBuf) -> Result<()> {
     Ok(())
 }
 
-pub fn copy<U: AsRef<Path>, V: AsRef<Path>>(from: U, to: V) -> Result<(), std::io::Error> {
+pub fn copy_recursive<U: AsRef<Path>, V: AsRef<Path>>(
+    from: U,
+    to: V,
+) -> Result<(), std::io::Error> {
     let mut stack = Vec::new();
     stack.push(PathBuf::from(from.as_ref()));
 

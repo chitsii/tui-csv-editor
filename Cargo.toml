@@ -13,6 +13,8 @@ csv = "1"
 regex = "1"
 tui-textarea = { git = "https://github.com/rhysd/tui-textarea.git"}
 anyhow = "1.0"
+toml = "0"
+chrono = "0"
 
 [profile.release]
 strip = true

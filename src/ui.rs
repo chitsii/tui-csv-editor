@@ -1,31 +1,15 @@
-use crate::model::{DataTable, InputText, StatefulList};
-
+use crate::model::{DataTable, StatefulList};
 use tui::{
     backend::Backend,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::{
-        Span,
-        Spans, //Text
-    },
+    text::{Span, Spans},
     widgets::{
-        Block,
-        BorderType,
-        Borders,
-        Cell,
-        Clear,
-        List,
-        ListItem,
-        ListState,
-        Paragraph,
-        Row,
-        Table,
-        //TableState,
+        Block, BorderType, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table,
         Wrap,
     },
     Frame,
 };
-
 use tui_textarea::TextArea;
 
 pub fn editor_title<'a>() -> Paragraph<'a> {
@@ -76,11 +60,13 @@ pub fn edit<B: Backend>(f: &mut Frame<B>, data_table: &mut DataTable) {
             .max()
             .unwrap_or(0)
             + 1;
-        let mut index_str = format!("{:>7}", index); //9,999,999までindex可能
+
+        //9,999,999までindex可能
+        let mut index_str = format!("{:>7}", index);
 
         match data_table.rows_selected.contains(&index) {
             true => {
-                index_str += "💋";
+                index_str += "🎈";
             }
             false => {}
         }
@@ -129,12 +115,8 @@ pub fn select<B: Backend>(f: &mut Frame<B>, menu_list: &mut StatefulList<ListIte
     let items = menu_list.items.clone();
     let items_widget = List::new(items)
         .block(Block::default().borders(Borders::ALL).title("List"))
-        .highlight_style(
-            Style::default() // .bg(Color::LightGreen)
-                .add_modifier(Modifier::BOLD),
-        )
-        .highlight_symbol(">>");
-
+        .highlight_style(Style::default().add_modifier(Modifier::BOLD))
+        .highlight_symbol("👉  ");
     // 表示
     f.render_stateful_widget(items_widget, rects[0], &mut menu_list.state);
 }

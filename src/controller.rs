@@ -1,78 +1,106 @@
-use crossterm::{
-    event::{
-        self,
-        DisableMouseCapture,
-        EnableMouseCapture,
-        Event,
-        KeyCode,
-        KeyEvent, //, KeyEvent, KeyEventKind, KeyModifiers,
-        KeyModifiers,
-        KeyboardEnhancementFlags,
-        ModifierKeyCode,
-        PopKeyboardEnhancementFlags,
-        PushKeyboardEnhancementFlags,
-    },
-    execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-};
-use std::collections::BTreeSet;
-use tui::{
-    backend::{Backend, CrosstermBackend},
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
-    text,
-    widgets::{Block, Borders, ListItem, Paragraph},
-    Terminal,
-};
-use tui_textarea::{Input, Key, TextArea};
+mod import {
+    pub use crossterm::{
+        event::{
+            self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
+            KeyboardEnhancementFlags, ModifierKeyCode, PopKeyboardEnhancementFlags,
+            PushKeyboardEnhancementFlags,
+        },
+        execute,
+        terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    };
 
-use crate::model::{DataTable, InputText, StatefulList};
-use crate::prelude::*;
+    pub use crate::model::{DataTable, StatefulList};
+    pub use crate::prelude::*;
+    pub use tui::{
+        backend::{Backend, CrosstermBackend},
+        layout::{Alignment, Constraint, Direction, Layout, Rect},
+        style::{Color, Modifier, Style},
+        text,
+        widgets::{Block, Borders, ListItem, Paragraph},
+        Terminal,
+    };
+    pub use tui_textarea::{Input, Key, TextArea};
+}
+use crate::controller::import::*;
 use crate::ui;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum ConsoleState {
     Start,
-    Select,
-    EditTable,
+    Select(Option<String>),
+    EditTable(String),
+    EditRow(String),
     CheckIntegrity,
     Quit,
 }
 
+type DataTables = BTreeMap<OsString, DataTable>;
+
 pub struct App {
     state: ConsoleState,
+    data_tables: DataTables,
+    archive_dir: String,
 }
 
 impl App {
-    fn new() -> Self {
+    pub fn new(config: &Value) -> Self {
+        let archive_dir = config["master"]["history"].as_str().unwrap();
+        let archive_dir = String::from(archive_dir);
+
+        let master_dir = config["master"]["directory"].as_str().unwrap();
+        let csv_paths = glob(master_dir, "csv", false).unwrap();
+
+        // data_tablesフィールドの作成
+        let mut data_tables: DataTables = BTreeMap::new();
+        for path in csv_paths.iter().map(Path::new) {
+            let data = get_string_records(path).unwrap();
+            let max_len = data.iter().map(|e| e.len()).max().unwrap();
+            let mut data: Vec<Vec<String>> = data
+                .iter()
+                .map(|record| record.iter().map(String::from).collect())
+                .collect();
+            for record_vec in data.iter_mut() {
+                if record_vec.len() < max_len {
+                    let diff = max_len - record_vec.len();
+                    let mut v = vec![String::new(); diff];
+                    record_vec.append(&mut v);
+                }
+            }
+            let data_table = DataTable::new(data);
+            let fname = path.file_name().unwrap().to_os_string();
+            data_tables.insert(fname, data_table);
+        }
+
         Self {
             state: ConsoleState::Start,
+            data_tables,
+            archive_dir,
         }
     }
-    pub fn run<B: Backend>(&mut self, terminal: &mut Terminal<B>) -> Result<()> {
-        //テーブルに表示するデータ準備
-        let data = vec![
-            vec!["Header1", "Header2", "Header3", "Header4", "Header5"],
-            vec!["Row11", "Row12", "1", "2.035", "True"],
-            vec!["Row21", "Row22", "2", "3.20", "False"],
-            vec!["Row31", "Row32", "3", "111.1", "False"],
-        ];
-        let mut data_table = DataTable::new(data);
 
+    fn get_table(&self, table_name: impl Into<OsString>) -> Option<&DataTable> {
+        let key = table_name.into();
+        self.data_tables.get(&key)
+    }
+    fn get_table_mut(&mut self, table_name: impl Into<OsString>) -> Option<&mut DataTable> {
+        let key = table_name.into();
+        self.data_tables.get_mut(&key)
+    }
+    fn get_text_for_save(self, table_name: String) -> Option<String> {
+        let v = self.get_table(table_name);
+        v.map(|data_table| data_table.text())
+    }
+    pub fn run<B: Backend>(&mut self, terminal: &mut Terminal<B>) -> Result<()> {
         // 画面遷移のイベントループ
         loop {
-            self.state = match self.state {
-                ConsoleState::Start => ConsoleState::Select,
-                ConsoleState::Select => {
-                    let items: Vec<ListItem> =
-                        vec![ListItem::new("text1.csv"), ListItem::new("text2.csv")];
-                    let menu_list = StatefulList::with_items(items.clone());
-                    self.selecting(terminal, menu_list).unwrap()
-                }
-                ConsoleState::EditTable => self.table_editing(terminal, &mut data_table).unwrap(),
+            self.state = match self.state.clone() {
+                ConsoleState::Start => ConsoleState::Select(None),
+                ConsoleState::Select(name) => self.select_csv(terminal, name)?,
+                ConsoleState::EditTable(name) => self.table_editing(terminal, name)?,
+                ConsoleState::EditRow(table_name) => self.row_editing(terminal, table_name)?,
                 ConsoleState::CheckIntegrity => {
                     println!("Integrity check mode");
-                    ConsoleState::EditTable
+                    ConsoleState::Select(None)
                 }
                 ConsoleState::Quit => break,
             };
@@ -80,25 +108,86 @@ impl App {
         Ok(())
     }
 
-    fn table_editing<B: Backend>(
+    fn select_csv<B: Backend>(
         &self,
         terminal: &mut Terminal<B>,
-        data_table: &mut DataTable,
+        table_name: Option<String>,
+    ) -> Result<ConsoleState> {
+        let items: Vec<String> = self
+            .data_tables
+            .keys()
+            .cloned()
+            .map(|os_string| os_string.into_string().unwrap())
+            .collect();
+        let mut menu_list =
+            StatefulList::with_items(items.iter().cloned().map(ListItem::new).collect());
+        match table_name {
+            Some(t) => {
+                let idx = items.iter().position(|x| *x == t);
+                menu_list.state.select(idx);
+            }
+            None => menu_list.next(),
+        }
+
+        loop {
+            terminal.draw(|f| ui::select(f, &mut menu_list))?;
+            if let Event::Key(key) = event::read()? {
+                match (key.code, key.modifiers) {
+                    // 編集
+                    (KeyCode::Enter, _) => {
+                        let selected = menu_list.state.selected().unwrap();
+                        let selected_table_name = &items[selected];
+                        return Ok(ConsoleState::EditTable(selected_table_name.to_string()));
+                    }
+                    // プログラム終了
+                    (KeyCode::Char('q'), _) => return Ok(ConsoleState::Quit),
+                    // 移動
+                    (KeyCode::Down, _) => menu_list.next(),
+                    (KeyCode::Up, _) => menu_list.previous(),
+                    // 編集したテーブルを保存
+                    // TODO: 未保存のテーブルがあるときだけ発動するように
+                    (KeyCode::Char('s'), KeyModifiers::CONTROL) => {
+                        let keys = self.data_tables.keys();
+                        let now_str = Local::now().format("%Y-%m-%d-%H%M%S-%Z").to_string();
+                        let save_dir = self.archive_dir.clone() + &now_str;
+
+                        for table_name in keys {
+                            let save_root_dir = OsString::from(&save_dir);
+                            let save_path = Path::new(&save_root_dir).join(Path::new(table_name));
+                            save_to_file(self.get_table(table_name).unwrap().text(), save_path)?;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    fn table_editing<B: Backend>(
+        &mut self,
+        terminal: &mut Terminal<B>,
+        fname: String,
     ) -> Result<ConsoleState> {
         loop {
+            let table_name = fname.clone();
+            let data_table = self.get_table_mut(table_name.clone()).unwrap();
+
             terminal.draw(|f| ui::edit(f, data_table))?;
 
             if let Event::Key(key_event) = event::read()? {
                 match key_event {
                     KeyEvent {
                         code: KeyCode::Esc, ..
-                    } => return Ok(ConsoleState::Select),
+                    } => return Ok(ConsoleState::Select(Some(table_name))),
                     KeyEvent {
                         code: KeyCode::Enter,
                         ..
-                    } => {
-                        self.row_editing(terminal, data_table)?;
-                    }
+                    } => match data_table.state.selected() {
+                        Some(_) => return Ok(ConsoleState::EditRow(table_name)),
+                        None => {
+                            continue;
+                        }
+                    },
                     KeyEvent {
                         code: KeyCode::Down,
                         ..
@@ -163,9 +252,9 @@ impl App {
     }
 
     fn row_editing<B: Backend>(
-        &self,
+        &mut self,
         terminal: &mut Terminal<B>,
-        data_table: &mut DataTable,
+        table_name: String,
     ) -> Result<ConsoleState> {
         // テキストエリアのアクティブ・非アクティブ関数
         fn inactivate(textarea: &mut TextArea<'_>) {
@@ -191,6 +280,7 @@ impl App {
         }
 
         //表示するカラム名の作成
+        let data_table = self.get_table_mut(table_name.clone()).unwrap();
         let col_names = data_table
             .schema
             .columns
@@ -273,7 +363,7 @@ impl App {
                     // テーブル編集に戻る
                     KeyEvent {
                         code: KeyCode::Esc, ..
-                    } => return Ok(ConsoleState::EditTable),
+                    } => return Ok(ConsoleState::EditTable(table_name)),
                     // 保存
                     KeyEvent {
                         code: KeyCode::Char('s'),
@@ -287,7 +377,7 @@ impl App {
                         {
                             *cell_value = text_areas[idx].lines().join("\n");
                         }
-                        return Ok(ConsoleState::EditTable);
+                        return Ok(ConsoleState::EditTable(table_name));
                     }
                     // 編集セルの移動　逆
                     KeyEvent {
@@ -323,56 +413,4 @@ impl App {
             }
         }
     }
-
-    fn selecting<B: Backend>(
-        &self,
-        terminal: &mut Terminal<B>,
-        mut menu_list: StatefulList<ListItem>,
-    ) -> Result<ConsoleState> {
-        loop {
-            terminal.draw(|f| ui::select(f, &mut menu_list))?;
-            if let Event::Key(key) = event::read()? {
-                match key.code {
-                    KeyCode::Enter => return Ok(ConsoleState::EditTable),
-                    KeyCode::Char('q') => return Ok(ConsoleState::Quit),
-                    KeyCode::Down => menu_list.next(),
-                    KeyCode::Up => menu_list.previous(),
-                    _ => {}
-                }
-            }
-        }
-    }
-}
-
-pub fn run_app() -> Result<()> {
-    // ターミナルのセットアップ
-    enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    execute!(
-        stdout,
-        EnterAlternateScreen,
-        EnableMouseCapture,
-        PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES) // https://docs.rs/crossterm/latest/crossterm/event/struct.PushKeyboardEnhancementFlags.html
-    )?;
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
-
-    let mut app = App::new();
-    let res = app.run(&mut terminal);
-
-    // ターミナルをrawモードから切り替え
-    disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture,
-        PopKeyboardEnhancementFlags
-    )?;
-    terminal.show_cursor()?;
-
-    if let Err(err) = res {
-        println!("{:?}", err)
-    }
-
-    Ok(())
 }

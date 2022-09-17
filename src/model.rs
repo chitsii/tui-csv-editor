@@ -1,7 +1,7 @@
-pub use std::collections::HashMap;
+use crate::prelude::*;
 
 use regex::{Regex, RegexBuilder};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
 pub use tui::widgets::{ListState, TableState};
 
@@ -11,7 +11,7 @@ pub enum DataType {
     Int64,
     Float64,
     Boolean,
-    Raw,
+    Unknown,
 }
 impl Display for DataType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -28,7 +28,7 @@ impl Display for DataType {
             DataType::Utf8 => {
                 write!(f, "String")
             }
-            DataType::Raw => {
+            DataType::Unknown => {
                 write!(f, "Unknown")
             }
         }
@@ -85,7 +85,7 @@ impl DataTable {
         for col_name in header {
             columns.push(Column {
                 name: col_name.into(),
-                data_type: DataType::Raw,
+                data_type: DataType::Unknown,
             });
         }
 
@@ -147,8 +147,9 @@ impl DataTable {
         };
         self.state.select(Some(i));
     }
-
     pub fn infer_field_type(&self, string: &str) -> DataType {
+        let empty_re = Regex::new("^$").unwrap();
+
         let boolean_re = RegexBuilder::new(r"^\s*(true)$|^(false)$")
             .case_insensitive(true)
             .build()
@@ -161,7 +162,9 @@ impl DataTable {
         let integer_re = Regex::new(r"^\s*-?(\d+)$").unwrap();
 
         // 特定順序でregexを適用して合致する型を探す
-        if boolean_re.is_match(string) {
+        if empty_re.is_match(string) {
+            DataType::Unknown
+        } else if boolean_re.is_match(string) {
             DataType::Boolean
         } else if float_re.is_match(string) {
             DataType::Float64
@@ -171,7 +174,6 @@ impl DataTable {
             DataType::Utf8
         }
     }
-
     pub fn infer_schema(&mut self, max_read_lines: Option<usize>) {
         // 推論に使用するライン数を全行数か設定行数にする
         let len = match max_read_lines {
@@ -179,8 +181,7 @@ impl DataTable {
             None => self.values.len(),
         };
 
-        // let mut field_dtypes: HashMap<Vec<DataType>, usize> = HashMap::new();
-        let mut field_dtypes = HashMap::<String, DataType>::new();
+        let mut field_dtypes = BTreeMap::<String, DataType>::new();
 
         for row in &self.values[0..len] {
             for (val, col) in row.iter().zip(self.schema.columns.iter()) {
@@ -213,30 +214,44 @@ impl DataTable {
                         Some(DataType::Float64) => (),
                         Some(DataType::Int64) => (),
                         Some(DataType::Boolean) => (),
-                        Some(DataType::Raw) => {
+                        Some(DataType::Unknown) => {
                             field_dtypes.insert(col_name.to_owned(), dtype);
                         }
                         None => {
                             field_dtypes.insert(col_name.to_owned(), dtype);
                         }
                     },
-                    DataType::Raw => (),
+                    DataType::Unknown => (),
                 }
             }
         }
 
         for c in self.schema.columns.iter_mut() {
-            let d = field_dtypes.get(&c.name).unwrap();
-            c.data_type = d.clone();
+            match field_dtypes.get(&c.name) {
+                Some(d) => {
+                    c.data_type = d.clone();
+                }
+                None => c.data_type = DataType::Unknown,
+            }
         }
     }
-
     pub fn add_row(&mut self) {
         let new_line = vec!["".to_owned(); self.schema.columns.len()]; // TODO: スキーマに沿ったデフォルト値生成
         self.values.push(new_line);
     }
     pub fn add_column(self) {
         self.schema.push(Column::default());
+    }
+    pub fn text(&self) -> String {
+        // TODO: ナイーブ
+        let text = self
+            .values
+            .iter()
+            .map(|record| record.join(", "))
+            .collect::<Vec<String>>()
+            .join("\n");
+
+        text
     }
 }
 
@@ -283,12 +298,4 @@ impl<T> StatefulList<T> {
     pub fn unselect(&mut self) {
         self.state.select(None);
     }
-}
-
-pub struct InputText {
-    pub input: String,
-    pub current_width: usize,
-    pub input_width: HashMap<usize, u16>,
-    pub messages: Vec<String>,
-    pub lines: usize,
 }

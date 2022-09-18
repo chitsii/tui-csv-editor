@@ -13,17 +13,14 @@ pub use crossterm::{
 use std::io::Stdout;
 use toml::Value;
 use tui::{
-    backend::{Backend, CrosstermBackend},
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    backend::CrosstermBackend,
+    layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Span, Spans},
-    widgets::{
-        Block, BorderType, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table,
-        Wrap,
-    },
+    widgets::{Block, BorderType, Borders, Cell, List, ListItem, Paragraph, Row, Table},
     Frame, Terminal,
 };
-use tui_textarea::{Input, Key, TextArea};
+use tui_textarea::{Input, TextArea};
 
 pub struct Ui {
     terminal: Terminal<CrosstermBackend<Stdout>>,
@@ -50,233 +47,11 @@ impl Ui {
 
         Ok(Ui { terminal, model })
     }
+}
 
-    pub fn draw_select(&mut self, table_name: Option<String>) -> Result<ConsoleState> {
-        fn select(f: &mut Frame<CrosstermBackend<Stdout>>, list: &mut StatefulList<ListItem>) {
-            // 画面領域の分割
-            let rects = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([Constraint::Min(50)].as_ref())
-                .margin(5)
-                .split(f.size());
-
-            let items = list.items.clone();
-            let items_widget = List::new(items)
-                .block(Block::default().borders(Borders::ALL).title("List"))
-                .highlight_style(Style::default().add_modifier(Modifier::BOLD))
-                .highlight_symbol("👉  ");
-            // 表示
-            f.render_stateful_widget(items_widget, rects[0], &mut list.state);
-        }
-
-        let items: Vec<&str> = self.model.tables();
-        let mut list = StatefulList::with_items(items.iter().cloned().map(ListItem::new).collect());
-
-        match table_name {
-            Some(t) => {
-                let idx = items.iter().position(|x| *x == t);
-                list.state.select(idx);
-            }
-            None => list.next(),
-        }
-
-        loop {
-            self.terminal.draw(|f| select(f, &mut list))?;
-            if let Event::Key(key) = event::read()? {
-                match (key.code, key.modifiers) {
-                    // 編集
-                    (KeyCode::Enter, _) => {
-                        let selected = list.state.selected().unwrap();
-                        let selected_table_name = &items[selected];
-                        return Ok(ConsoleState::EditTable(selected_table_name.to_string()));
-                    }
-                    // プログラム終了
-                    (KeyCode::Char('q'), _) => return Ok(ConsoleState::Quit),
-                    // 移動
-                    (KeyCode::Down, _) => list.next(),
-                    (KeyCode::Up, _) => list.previous(),
-                    // 編集したテーブルを保存
-                    (KeyCode::Char('s'), KeyModifiers::CONTROL) => {
-                        self.model.save()?;
-                    }
-                    _ => {}
-                }
-            }
-        }
-    }
-    pub fn draw_table_editing(&mut self, table_name: &str) -> Result<ConsoleState> {
-        fn editor_title<'a>() -> Paragraph<'a> {
-            let text = vec![
-                Spans::from(vec![
-                    Span::raw("CSV Editor"),
-                    Span::styled("操作方法", Style::default().fg(Color::LightCyan)),
-                ]),
-                Spans::from(Span::styled("Second line", Style::default().fg(Color::Red))),
-            ];
-            Paragraph::new(text).alignment(Alignment::Center).block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .style(Style::default().fg(Color::White))
-                    .border_type(BorderType::Plain),
-            )
-        }
-        let table = self.model.get_table_mut(table_name).unwrap();
-
-        fn table_editing(f: &mut Frame<CrosstermBackend<Stdout>>, table: &mut DataTable) {
-            // 画面領域の分割
-            let rects = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([Constraint::Percentage(10), Constraint::Percentage(90)].as_ref())
-                .margin(5)
-                .split(f.size());
-
-            // テーブル作成開始
-            //行を選択した時のスタイル
-            let selected_style = Style::default().add_modifier(Modifier::REVERSED);
-
-            //表示するヘッダのの作成
-            let header_style = Style::default()
-                .bg(Color::Black)
-                .add_modifier(Modifier::BOLD);
-
-            let header = table.schema.columns.iter().map(|c| {
-                Cell::from(format!("{}\n [{}]", c.name, c.data_type))
-                    .style(Style::default().fg(Color::Gray))
-            });
-
-            let idx_column = [Cell::from("")].into_iter();
-            let header_cells = idx_column.chain(header);
-            let header = Row::new(header_cells).style(header_style).height(2);
-
-            //表示するデータの作成
-            let rows = table.values.iter().enumerate().map(|(index, item)| {
-                let height = item
-                    .iter()
-                    .map(|content| content.chars().filter(|c| *c == '\n').count())
-                    .max()
-                    .unwrap_or(0)
-                    + 1;
-
-                //9,999,999までindex可能
-                let mut index_str = format!("{:>7}", index);
-
-                match table.rows_selected.contains(&index) {
-                    true => {
-                        index_str += "🎈";
-                    }
-                    false => {}
-                }
-
-                let idx_cell =
-                    [Cell::from(index_str).style(Style::default().fg(Color::DarkGray))].into_iter();
-                let value_cells = item.iter().map(|c| Cell::from(c.clone()));
-                let cells = idx_cell.chain(value_cells);
-                Row::new(cells).height(height as u16).bottom_margin(0)
-            });
-
-            // 表示するカラムのwidthsを動的に作る
-            // 1カラム目は7(index), 残りはvalueで一律長さ30
-            let mut widths = vec![Constraint::Length(10)];
-            let mut value_widths = vec![Constraint::Length(30); table.schema.columns.len()];
-            widths.append(&mut value_widths);
-
-            let t = Table::new(rows)
-                .header(header)
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_style(Style::default().fg(Color::LightMagenta))
-                        .title(table.schema.name.clone()),
-                )
-                .highlight_style(selected_style)
-                .widths(&widths);
-
-            // helpを作成
-            let title = editor_title();
-
-            // 表示
-            f.render_widget(title, rects[0]);
-            f.render_stateful_widget(t, rects[1], &mut table.state);
-        }
-
-        loop {
-            self.terminal.draw(|f| table_editing(f, table))?;
-
-            if let Event::Key(key_event) = event::read()? {
-                match key_event {
-                    KeyEvent {
-                        code: KeyCode::Esc, ..
-                    } => return Ok(ConsoleState::Select(Some(table_name.to_string()))),
-                    KeyEvent {
-                        code: KeyCode::Enter,
-                        ..
-                    } => match table.state.selected() {
-                        Some(_) => return Ok(ConsoleState::EditRow(table_name.to_string())),
-                        None => {
-                            continue;
-                        }
-                    },
-                    KeyEvent {
-                        code: KeyCode::Down,
-                        ..
-                    } => table.next(),
-                    KeyEvent {
-                        code: KeyCode::Up, ..
-                    } => table.previous(),
-                    // スキーマの再推論
-                    KeyEvent {
-                        code: KeyCode::Char('r'),
-                        modifiers: KeyModifiers::CONTROL,
-                        ..
-                    } => table.infer_schema(Some(100)),
-                    // 行を選択
-                    KeyEvent {
-                        code: KeyCode::Right,
-                        ..
-                    } => {
-                        if let Some(idx) = table.state.selected() {
-                            table.rows_selected.insert(idx);
-                        }
-                    }
-                    // 行選択をはずす
-                    KeyEvent {
-                        code: KeyCode::Left,
-                        ..
-                    } => {
-                        if let Some(idx) = table.state.selected() {
-                            if table.rows_selected.contains(&idx) {
-                                table.rows_selected.take(&idx);
-                            }
-                        }
-                    }
-                    // ペースト
-                    KeyEvent {
-                        code: KeyCode::Char('v'),
-                        modifiers: KeyModifiers::CONTROL,
-                        ..
-                    } => {
-                        for idx in &table.rows_selected {
-                            let r = table.values[*idx].clone();
-                            table.values.insert(table.state.selected().unwrap() + 1, r)
-                        }
-                    }
-                    //行削除
-                    KeyEvent {
-                        code: KeyCode::Delete,
-                        ..
-                    } => {
-                        for i in table.rows_selected.iter().rev() {
-                            table.values.remove(*i);
-                        }
-                        table.rows_selected = BTreeSet::new(); //該当行を消したので初期化
-                        table.state.select(None); // select行が消えた場合はNoneにする
-                    }
-                    _ => (),
-                }
-            }
-        }
-    }
-    pub fn draw_row_editing(&mut self, table_name: &str) -> Result<ConsoleState> {
+// 行編集画面
+impl Ui {
+    pub fn draw_edit_row(&mut self, table_name: &str) -> Result<ConsoleState> {
         // テキストエリアのアクティブ・非アクティブ関数
         fn inactivate(textarea: &mut TextArea<'_>) {
             textarea.set_cursor_line_style(Style::default());
@@ -428,6 +203,242 @@ impl Ui {
     }
 }
 
+// テーブル編集画面
+impl Ui {
+    pub fn draw_edit_table(&mut self, table_name: &str) -> Result<ConsoleState> {
+        let table = self.model.get_table_mut(table_name).unwrap();
+
+        loop {
+            self.terminal.draw(|f| Ui::table_editing(f, table))?;
+
+            if let Event::Key(key_event) = event::read()? {
+                match key_event {
+                    KeyEvent {
+                        code: KeyCode::Esc, ..
+                    } => return Ok(ConsoleState::Select(Some(table_name.to_string()))),
+                    KeyEvent {
+                        code: KeyCode::Enter,
+                        ..
+                    } => match table.state.selected() {
+                        Some(_) => return Ok(ConsoleState::EditRow(table_name.to_string())),
+                        None => {
+                            continue;
+                        }
+                    },
+                    KeyEvent {
+                        code: KeyCode::Down,
+                        ..
+                    } => table.next(),
+                    KeyEvent {
+                        code: KeyCode::Up, ..
+                    } => table.previous(),
+                    // スキーマの再推論
+                    KeyEvent {
+                        code: KeyCode::Char('r'),
+                        modifiers: KeyModifiers::CONTROL,
+                        ..
+                    } => table.infer_schema(Some(100)),
+                    // 行を選択
+                    KeyEvent {
+                        code: KeyCode::Right,
+                        ..
+                    } => {
+                        if let Some(idx) = table.state.selected() {
+                            table.rows_selected.insert(idx);
+                        }
+                    }
+                    // 行選択をはずす
+                    KeyEvent {
+                        code: KeyCode::Left,
+                        ..
+                    } => {
+                        if let Some(idx) = table.state.selected() {
+                            if table.rows_selected.contains(&idx) {
+                                table.rows_selected.take(&idx);
+                            }
+                        }
+                    }
+                    // ペースト
+                    KeyEvent {
+                        code: KeyCode::Char('v'),
+                        modifiers: KeyModifiers::CONTROL,
+                        ..
+                    } => {
+                        for idx in &table.rows_selected {
+                            let r = table.values[*idx].clone();
+                            table.values.insert(table.state.selected().unwrap() + 1, r)
+                        }
+                    }
+                    //行削除
+                    KeyEvent {
+                        code: KeyCode::Delete,
+                        ..
+                    } => {
+                        for i in table.rows_selected.iter().rev() {
+                            table.values.remove(*i);
+                        }
+                        table.rows_selected = BTreeSet::new(); //該当行を消したので初期化
+                        table.state.select(None); // select行が消えた場合はNoneにする
+                    }
+                    _ => (),
+                }
+            }
+        }
+    }
+    fn table_editing(f: &mut Frame<CrosstermBackend<Stdout>>, table: &mut DataTable) {
+        // 画面領域の分割
+        let rects = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(10), Constraint::Percentage(90)].as_ref())
+            .margin(5)
+            .split(f.size());
+
+        // テーブル作成開始
+        //行を選択した時のスタイル
+        let selected_style = Style::default().add_modifier(Modifier::REVERSED);
+
+        //表示するヘッダのの作成
+        let header_style = Style::default()
+            .bg(Color::Black)
+            .add_modifier(Modifier::BOLD);
+
+        let header = table.schema.columns.iter().map(|c| {
+            Cell::from(format!("{}\n [{}]", c.name, c.data_type))
+                .style(Style::default().fg(Color::Gray))
+        });
+
+        let idx_column = [Cell::from("")].into_iter();
+        let header_cells = idx_column.chain(header);
+        let header = Row::new(header_cells).style(header_style).height(2);
+
+        //表示するデータの作成
+        let rows = table.values.iter().enumerate().map(|(index, item)| {
+            let height = item
+                .iter()
+                .map(|content| content.chars().filter(|c| *c == '\n').count())
+                .max()
+                .unwrap_or(0)
+                + 1;
+
+            //9,999,999までindex可能
+            let mut index_str = format!("{:>7}", index);
+
+            match table.rows_selected.contains(&index) {
+                true => {
+                    index_str += "🎈";
+                }
+                false => {}
+            }
+
+            let idx_cell =
+                [Cell::from(index_str).style(Style::default().fg(Color::DarkGray))].into_iter();
+            let value_cells = item.iter().map(|c| Cell::from(c.clone()));
+            let cells = idx_cell.chain(value_cells);
+            Row::new(cells).height(height as u16).bottom_margin(0)
+        });
+
+        // 表示するカラムのwidthsを動的に作る
+        // 1カラム目は7(index), 残りはvalueで一律長さ30
+        let mut widths = vec![Constraint::Length(10)];
+        let mut value_widths = vec![Constraint::Length(30); table.schema.columns.len()];
+        widths.append(&mut value_widths);
+
+        let t = Table::new(rows)
+            .header(header)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::LightMagenta))
+                    .title(table.schema.name.clone()),
+            )
+            .highlight_style(selected_style)
+            .widths(&widths);
+
+        // helpを作成
+        let title = Ui::editor_title();
+
+        // 表示
+        f.render_widget(title, rects[0]);
+        f.render_stateful_widget(t, rects[1], &mut table.state);
+    }
+    fn editor_title<'a>() -> Paragraph<'a> {
+        let text = vec![
+            Spans::from(vec![
+                Span::raw("CSV Editor"),
+                Span::styled("操作方法", Style::default().fg(Color::LightCyan)),
+            ]),
+            Spans::from(Span::styled("Second line", Style::default().fg(Color::Red))),
+        ];
+        Paragraph::new(text).alignment(Alignment::Center).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .style(Style::default().fg(Color::White))
+                .border_type(BorderType::Plain),
+        )
+    }
+}
+
+// CSV選択画面
+impl Ui {
+    pub fn draw_select_csv(&mut self, table_name: Option<String>) -> Result<ConsoleState> {
+        let items: Vec<&str> = self.model.tables();
+        let mut list = StatefulList::with_items(items.iter().cloned().map(ListItem::new).collect());
+
+        match table_name {
+            Some(t) => {
+                let idx = items.iter().position(|x| *x == t);
+                list.state.select(idx);
+            }
+            None => list.next(),
+        }
+
+        loop {
+            self.terminal.draw(|f| {
+                Ui::select_csv_widgets(f, &mut list);
+            })?;
+
+            if let Event::Key(key) = event::read()? {
+                match (key.code, key.modifiers) {
+                    // 編集
+                    (KeyCode::Enter, _) => {
+                        let selected = list.state.selected().unwrap();
+                        let selected_table_name = &items[selected];
+                        return Ok(ConsoleState::EditTable(selected_table_name.to_string()));
+                    }
+                    // プログラム終了
+                    (KeyCode::Char('q'), _) => return Ok(ConsoleState::Quit),
+                    // 移動
+                    (KeyCode::Down, _) => list.next(),
+                    (KeyCode::Up, _) => list.previous(),
+                    // 編集したテーブルを保存
+                    (KeyCode::Char('s'), KeyModifiers::CONTROL) => {
+                        self.model.save()?;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    fn select_csv_widgets(
+        f: &mut Frame<CrosstermBackend<Stdout>>,
+        list: &mut StatefulList<ListItem>,
+    ) {
+        // 画面領域の分割
+        let rects = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(50)].as_ref())
+            .margin(5)
+            .split(f.size());
+        let items = list.items.clone();
+        let widgets = List::new(items)
+            .block(Block::default().borders(Borders::ALL).title("List"))
+            .highlight_style(Style::default().add_modifier(Modifier::BOLD))
+            .highlight_symbol("👉  ");
+        f.render_stateful_widget(widgets, rects[0], &mut list.state);
+    }
+}
+
+// デストラクタ
 impl Drop for Ui {
     fn drop(&mut self) {
         // ターミナルを元に戻す

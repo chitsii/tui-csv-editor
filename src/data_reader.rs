@@ -1,6 +1,6 @@
 extern crate csv;
 use crate::prelude::*;
-use csv::{Error, StringRecord};
+use csv::StringRecord;
 
 pub fn get_string_records(path: &Path) -> Result<Vec<StringRecord>> {
     let text = get_text(path);

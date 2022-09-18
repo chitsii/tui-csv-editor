@@ -49,15 +49,14 @@ impl<'a> System {
             ui,
         }
     }
-
     pub fn run(&mut self) -> Result<()> {
         // 画面遷移のイベントループ
         loop {
             self.state = match self.state.clone() {
                 ConsoleState::Start => ConsoleState::Select(None),
                 ConsoleState::Select(name) => self.select_csv(name)?,
-                ConsoleState::EditTable(name) => self.table_editing(name)?,
-                ConsoleState::EditRow(name) => self.row_editing(name)?,
+                ConsoleState::EditTable(name) => self.edit_table(name)?,
+                ConsoleState::EditRow(name) => self.edit_row(name)?,
                 ConsoleState::CheckIntegrity => {
                     println!("Integrity check mode");
                     ConsoleState::Select(None)
@@ -67,17 +66,14 @@ impl<'a> System {
         }
         Ok(())
     }
-    /// テーブル編集（レコード単位）
-    fn table_editing(&mut self, fname: String) -> Result<ConsoleState> {
-        self.ui.draw_table_editing(fname.as_str())
-    }
 
-    /// レコード編集（セル単位）
-    fn row_editing(&mut self, table_name: String) -> Result<ConsoleState> {
-        self.ui.draw_row_editing(table_name.as_str())
-    }
-    /// テーブル選択
     fn select_csv(&mut self, table_name: Option<String>) -> Result<ConsoleState> {
-        self.ui.draw_select(table_name)
+        self.ui.draw_select_csv(table_name)
+    }
+    fn edit_table(&mut self, fname: String) -> Result<ConsoleState> {
+        self.ui.draw_edit_table(fname.as_str())
+    }
+    fn edit_row(&mut self, table_name: String) -> Result<ConsoleState> {
+        self.ui.draw_edit_row(table_name.as_str())
     }
 }

@@ -1,7 +1,7 @@
 use crate::prelude::*;
 use std::ffi::OsString;
 use std::fs::{self, DirBuilder, File};
-use std::io::{BufRead, BufReader, BufWriter, Read, Write};
+use std::io::{BufReader, Read, Write};
 
 /// 対象ディレクトリを再帰的に探索して、指定拡張子のファイルのパスの配列を返す
 pub fn glob(target: &str, target_ext: &str, recursive: bool) -> Result<Vec<OsString>> {

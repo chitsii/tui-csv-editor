@@ -1,8 +1,7 @@
 use crate::prelude::*;
 use std::env;
-use std::fs;
 use std::fs::{DirBuilder, File};
-use std::io::{BufReader, BufWriter, Read, Write};
+use std::io::{BufWriter, Write};
 use toml::Value;
 
 const DEFAULT_CONFIG: &str = r#"

@@ -1,5 +1,4 @@
 use crate::prelude::*;
-use csv::StringRecord;
 use regex::{Regex, RegexBuilder};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
@@ -46,7 +45,7 @@ impl Default for Column {
     fn default() -> Self {
         Self {
             name: String::new(),
-            data_type: DataType::Utf8,
+            data_type: DataType::Unknown,
         }
     }
 }
@@ -60,14 +59,6 @@ impl Display for Column {
 pub struct TableSchema {
     pub name: String,
     pub columns: Vec<Column>,
-}
-impl TableSchema {
-    fn push(mut self, new_column: Column) {
-        self.columns.push(new_column);
-    }
-    fn remove(mut self, index: usize) {
-        self.columns.remove(index);
-    }
 }
 
 #[derive(Debug)]
@@ -247,9 +238,7 @@ impl DataTable {
         let new_line = vec!["".to_owned(); self.schema.columns.len()]; // TODO: スキーマに沿ったデフォルト値生成
         self.values.push(new_line);
     }
-    pub fn add_column(self) {
-        self.schema.push(Column::default());
-    }
+
     pub fn header(&self) -> Vec<&str> {
         self.schema
             .columns
@@ -270,7 +259,6 @@ impl<T> StatefulList<T> {
             items,
         }
     }
-
     pub fn next(&mut self) {
         let i = match self.state.selected() {
             Some(i) => {
@@ -284,7 +272,6 @@ impl<T> StatefulList<T> {
         };
         self.state.select(Some(i));
     }
-
     pub fn previous(&mut self) {
         let i = match self.state.selected() {
             Some(i) => {
@@ -298,13 +285,10 @@ impl<T> StatefulList<T> {
         };
         self.state.select(Some(i));
     }
-
     pub fn unselect(&mut self) {
         self.state.select(None);
     }
 }
-
-// pub type DataTables = BTreeMap<OsString, DataTable>;
 
 pub struct DataTables {
     pub dir: PathBuf,

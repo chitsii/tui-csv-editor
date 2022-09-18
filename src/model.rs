@@ -1,9 +1,11 @@
 use crate::prelude::*;
-
+use csv::StringRecord;
 use regex::{Regex, RegexBuilder};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
-pub use tui::widgets::{ListState, TableState};
+pub use std::fs::{self, DirBuilder, File};
+use toml::Value;
+use tui::widgets::{ListState, TableState};
 
 #[derive(Debug, Clone)]
 pub enum DataType {
@@ -48,6 +50,12 @@ impl Default for Column {
         }
     }
 }
+impl Display for Column {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TableSchema {
     pub name: String,
@@ -242,16 +250,12 @@ impl DataTable {
     pub fn add_column(self) {
         self.schema.push(Column::default());
     }
-    pub fn text(&self) -> String {
-        // TODO: ナイーブ
-        let text = self
-            .values
+    pub fn header(&self) -> Vec<&str> {
+        self.schema
+            .columns
             .iter()
-            .map(|record| record.join(", "))
-            .collect::<Vec<String>>()
-            .join("\n");
-
-        text
+            .map(|e| e.name.as_str())
+            .collect()
     }
 }
 
@@ -297,5 +301,101 @@ impl<T> StatefulList<T> {
 
     pub fn unselect(&mut self) {
         self.state.select(None);
+    }
+}
+
+// pub type DataTables = BTreeMap<OsString, DataTable>;
+
+pub struct DataTables {
+    pub dir: PathBuf,
+    archive_dir: PathBuf,
+    pub data: BTreeMap<OsString, DataTable>,
+}
+
+impl DataTables {
+    pub fn new(config: &Value) -> Self {
+        let archive_dir = config["master"]["history"].as_str().unwrap();
+        let archive_dir = PathBuf::from(archive_dir);
+
+        let master_dir = config["master"]["directory"].as_str().unwrap();
+        let csv_paths = glob(master_dir, "csv", false).unwrap();
+
+        // data_tablesフィールドの作成
+        let mut data_tables = BTreeMap::new();
+        for path in csv_paths.iter().map(Path::new) {
+            let data = get_string_records(path).unwrap();
+            let max_len = data.iter().map(|e| e.len()).max().unwrap();
+            let mut data: Vec<Vec<String>> = data
+                .iter()
+                .map(|record| record.iter().map(String::from).collect())
+                .collect();
+            for record_vec in data.iter_mut() {
+                if record_vec.len() < max_len {
+                    let diff = max_len - record_vec.len();
+                    let mut v = vec![String::new(); diff];
+                    record_vec.append(&mut v);
+                }
+            }
+            let data_table = DataTable::new(data);
+            let fname = path.file_name().unwrap().to_os_string();
+            data_tables.insert(fname, data_table);
+        }
+        Self {
+            dir: PathBuf::from(master_dir),
+            archive_dir,
+            data: data_tables,
+        }
+    }
+    pub fn master_dir(&self) -> PathBuf {
+        self.dir.clone()
+    }
+    pub fn get_table(&self, table_name: impl Into<OsString>) -> Option<&DataTable> {
+        let key = table_name.into();
+        self.data.get(&key)
+    }
+    pub fn get_table_mut(&mut self, table_name: impl Into<OsString>) -> Option<&mut DataTable> {
+        let key = table_name.into();
+        self.data.get_mut(&key)
+    }
+    pub fn tables(&self) -> Vec<&str> {
+        self.data
+            .keys()
+            .map(|t| t.as_os_str().to_str().unwrap())
+            .collect()
+    }
+    pub fn save(&self) -> Result<()> {
+        // TODO 未保存フラグがあるときだけ発動するように
+        let save_dir = self.archive_tables()?;
+        self.flush_master_dir(save_dir)?;
+        Ok(())
+    }
+    /// master_dirにアーカイブ済みのデータを上書きコピーする
+    fn flush_master_dir(&self, source_dir: PathBuf) -> Result<()> {
+        copy_recursive(source_dir, &self.master_dir())?;
+        Ok(())
+    }
+    /// アーカイブ先に日時のディレクトリを作成し、App持っている各テーブルをCSVに保存
+    fn archive_tables(&self) -> Result<PathBuf> {
+        let now_str = Local::now().format("%Y-%m-%d-%H%M%S").to_string();
+        let save_dir = self.archive_dir.join(PathBuf::from(&now_str));
+        if !&save_dir.exists() {
+            DirBuilder::new().recursive(true).create(&save_dir)?;
+        }
+        // 各テーブルのCSV保存
+        for table_name in self.tables() {
+            let save_file_path = {
+                let mut save_path = save_dir.join(Path::new(table_name));
+                save_path.set_extension("csv");
+                save_path
+            };
+            let file = File::create(&save_file_path).unwrap();
+            let mut writer = csv::Writer::from_writer(file);
+            let table = self.get_table(table_name).unwrap();
+            writer.write_record(table.header())?;
+            for record in &table.values {
+                writer.write_record(record)?;
+            }
+        }
+        Ok(save_dir)
     }
 }

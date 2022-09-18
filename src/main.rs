@@ -40,36 +40,8 @@ pub use tui::{
 fn main() -> Result<()> {
     let config = config::load_config()?;
 
-    run_app(config)?;
-
-    Ok(())
-}
-
-pub fn run_app(config: Value) -> Result<()> {
-    // ターミナルのセットアップ
-    enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    execute!(
-        stdout,
-        EnterAlternateScreen,
-        EnableMouseCapture,
-        PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES) // https://docs.rs/crossterm/latest/crossterm/event/struct.PushKeyboardEnhancementFlags.html
-    )?;
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
-
-    let mut app = controller::App::new(&config);
-    let res = app.run(&mut terminal);
-
-    // ターミナルをrawモードから切り替え
-    disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture,
-        PopKeyboardEnhancementFlags
-    )?;
-    terminal.show_cursor()?;
+    let mut app = controller::System::new(&config);
+    let res = app.run();
 
     if let Err(err) = res {
         println!("{:?}", err)

@@ -10,7 +10,7 @@ pub use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use std::io::Stdout;
+use std::io::{self, Stdout};
 use toml::Value;
 use tui::{
     backend::CrosstermBackend,

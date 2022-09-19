@@ -1,7 +1,7 @@
 use crate::prelude::*;
 use std::ffi::OsString;
-use std::fs::{self, DirBuilder, File};
-use std::io::{BufReader, Read, Write};
+use std::fs::{self, File};
+use std::io::{BufReader, Read};
 
 /// 対象ディレクトリを再帰的に探索して、指定拡張子のファイルのパスの配列を返す
 pub fn glob(target: &str, target_ext: &str, recursive: bool) -> Result<Vec<OsString>> {
@@ -39,19 +39,6 @@ pub fn get_text(path: &Path) -> String {
         panic!("couldn't read {}: {}", display, &e.to_string())
     }
     text
-}
-
-pub fn save_to_file(content: String, path: PathBuf) -> Result<()> {
-    let dir = path.parent().unwrap();
-    // 指定ディレクトリが存在しない場合、作る
-    if !&dir.exists() {
-        DirBuilder::new().recursive(true).create(&dir)?;
-    }
-    //write-onlyモードでファイルに書き込み
-    let mut file = File::create(path)?;
-    write!(file, "{}", content)?;
-    file.flush()?;
-    Ok(())
 }
 
 pub fn copy_recursive<U: AsRef<Path>, V: AsRef<Path>>(

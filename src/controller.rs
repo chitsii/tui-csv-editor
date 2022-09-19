@@ -31,7 +31,6 @@ pub enum ConsoleState {
     Select(Option<String>),
     EditTable(String),
     EditRow(String),
-    CheckIntegrity,
     Quit,
 }
 
@@ -57,10 +56,6 @@ impl<'a> System {
                 ConsoleState::Select(name) => self.select_csv(name)?,
                 ConsoleState::EditTable(name) => self.edit_table(name)?,
                 ConsoleState::EditRow(name) => self.edit_row(name)?,
-                ConsoleState::CheckIntegrity => {
-                    println!("Integrity check mode");
-                    ConsoleState::Select(None)
-                }
                 ConsoleState::Quit => break,
             };
         }

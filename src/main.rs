@@ -1,5 +1,5 @@
-// #![allow(dead_code)]
-// #![allow(unused_imports)]
+#![allow(dead_code)]
+#![allow(unused_imports)]
 
 mod prelude {
     pub use crate::data_reader::get_string_records;
@@ -11,6 +11,7 @@ mod prelude {
     pub use std::path::{Path, PathBuf};
     pub use toml::Value;
 }
+use crate::prelude::*;
 
 mod config;
 mod controller;
@@ -18,7 +19,6 @@ mod data_reader;
 mod model;
 mod ui;
 mod utils;
-use crate::prelude::*;
 
 pub use tui::{
     backend::{Backend, CrosstermBackend},

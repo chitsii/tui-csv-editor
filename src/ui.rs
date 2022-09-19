@@ -24,7 +24,7 @@ use tui_textarea::{Input, TextArea};
 
 pub struct Ui {
     terminal: Terminal<CrosstermBackend<Stdout>>,
-    pub model: DataTables,
+    model: DataTables,
 }
 
 impl Ui {
@@ -67,7 +67,6 @@ impl Ui {
         }
 
         fn activate(textarea: &mut TextArea<'_>) {
-            // textarea.set_cursor_line_style(Style::default().add_modifier(Modifier::UNDERLINED));
             textarea.set_cursor_style(Style::default().add_modifier(Modifier::REVERSED));
             let b = textarea
                 .block()
@@ -92,55 +91,50 @@ impl Ui {
         }
         activate(&mut text_areas[0]);
 
+        // 画面分割の比率を設定
+        let global_widths = [Constraint::Percentage(10), Constraint::Percentage(90)];
+        let textarea_widths_h = vec![Constraint::Percentage(10), Constraint::Percentage(90)];
+        let textarea_widths_v =
+            vec![Constraint::Ratio(100 / table.header().len() as u32, 100); table.header().len()];
+        // vec![Constraint::Percentage(100 / table.header().len() as u16); table.header().len()];
+
+        // 画面レイアウト分割
+        let global_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(global_widths);
+        let editor = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints(textarea_widths_h.as_ref());
+        let table_header = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(textarea_widths_v.as_ref());
+        let table_values = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(textarea_widths_v.as_ref());
+
         loop {
             self.terminal.draw(|f| {
-                // グローバルの画面領域分割
-                let global_chunks = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints([Constraint::Percentage(10), Constraint::Percentage(90)])
-                    .margin(2)
-                    .split(f.size());
+                let global_chunks = global_chunks.split(f.size());
+                let editor = editor.split(global_chunks[1]);
+                let table_header = table_header.split(editor[0]);
+                let table_values = table_values.split(editor[1]);
 
-                // ヘルプ情報
+                // ウィジェット作成
                 let help_info = Paragraph::new("help information here.")
                     .block(Block::default().borders(Borders::ALL))
                     .alignment(tui::layout::Alignment::Center);
-
-                // エディタ
-                let editor_chunks = Layout::default()
-                    .direction(Direction::Horizontal)
-                    .constraints([Constraint::Percentage(10), Constraint::Percentage(90)].as_ref())
-                    .margin(2)
-                    .split(global_chunks[1]);
-
                 let header = table.header().into_iter().map(|name| {
                     Paragraph::new(name)
                         .block(Block::default().borders(Borders::ALL))
                         .alignment(tui::layout::Alignment::Center)
                 });
-                let constraints = vec![
-                    Constraint::Percentage(80 / table.header().len() as u16);
-                    table.header().len()
-                ];
-                let header_chunks = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints(constraints.as_ref())
-                    .split(editor_chunks[0]);
 
-                // エディタの編集部分
-                let val_editing_chunks = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints([Constraint::Percentage(80 / 5); 5])
-                    .split(editor_chunks[1]);
-
-                // ヘルプ表示
+                // 表示
                 f.render_widget(help_info, global_chunks[0]);
-                // ヘッダ　カラム名\n[型]の表示
-                for (paragraph, chunk) in header.zip(header_chunks) {
+                for (paragraph, chunk) in header.zip(table_header) {
                     f.render_widget(paragraph, chunk);
                 }
-                // 編集エリアの表示
-                for (textarea, chunk) in text_areas.iter().zip(val_editing_chunks) {
+                for (textarea, chunk) in text_areas.iter().zip(table_values) {
                     let widget = textarea.widget();
                     f.render_widget(widget, chunk);
                 }
@@ -287,14 +281,13 @@ impl Ui {
     }
     fn table_editing(f: &mut Frame<CrosstermBackend<Stdout>>, table: &mut DataTable) {
         // 画面領域の分割
-        let rects = Layout::default()
-            .direction(Direction::Horizontal)
+        let global_chunks = Layout::default()
+            .direction(Direction::Vertical)
             .constraints([Constraint::Percentage(10), Constraint::Percentage(90)].as_ref())
-            .margin(5)
             .split(f.size());
 
         // テーブル作成開始
-        //行を選択した時のスタイル
+        // 行を選択した時のスタイル
         let selected_style = Style::default().add_modifier(Modifier::REVERSED);
 
         //表示するヘッダのの作成
@@ -302,13 +295,13 @@ impl Ui {
             .bg(Color::Black)
             .add_modifier(Modifier::BOLD);
 
-        let header = table.schema.columns.iter().map(|c| {
+        let header_iter = table.schema.columns.iter().map(|c| {
             Cell::from(format!("{}\n [{}]", c.name, c.data_type))
                 .style(Style::default().fg(Color::Gray))
         });
 
         let idx_column = [Cell::from("")].into_iter();
-        let header_cells = idx_column.chain(header);
+        let header_cells = idx_column.chain(header_iter);
         let header = Row::new(header_cells).style(header_style).height(2);
 
         //表示するデータの作成
@@ -340,7 +333,10 @@ impl Ui {
         // 表示するカラムのwidthsを動的に作る
         // 1カラム目は7(index), 残りはvalueで一律長さ30
         let mut widths = vec![Constraint::Length(10)];
-        let mut value_widths = vec![Constraint::Length(30); table.schema.columns.len()];
+        let mut value_widths = vec![
+            Constraint::Percentage(95 / table.schema.columns.len() as u16);
+            table.schema.columns.len()
+        ];
         widths.append(&mut value_widths);
 
         let t = Table::new(rows)
@@ -354,27 +350,13 @@ impl Ui {
             .highlight_style(selected_style)
             .widths(&widths);
 
-        // helpを作成
-        let title = Ui::editor_title();
-
+        // ヘルプ情報
+        let help_info = Paragraph::new("help information here.")
+            .block(Block::default().borders(Borders::ALL))
+            .alignment(tui::layout::Alignment::Center);
         // 表示
-        f.render_widget(title, rects[0]);
-        f.render_stateful_widget(t, rects[1], &mut table.state);
-    }
-    fn editor_title<'a>() -> Paragraph<'a> {
-        let text = vec![
-            Spans::from(vec![
-                Span::raw("CSV Editor"),
-                Span::styled("操作方法", Style::default().fg(Color::LightCyan)),
-            ]),
-            Spans::from(Span::styled("Second line", Style::default().fg(Color::Red))),
-        ];
-        Paragraph::new(text).alignment(Alignment::Center).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .style(Style::default().fg(Color::White))
-                .border_type(BorderType::Plain),
-        )
+        f.render_widget(help_info, global_chunks[0]);
+        f.render_stateful_widget(t, global_chunks[1], &mut table.state);
     }
 }
 
